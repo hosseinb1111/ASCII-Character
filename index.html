@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ASCII Character · v8</title>
+<style>
+    html, body {
+        margin: 0; padding: 0;
+        width: 100%; height: 100%;
+        overflow: hidden;
+        background: #f4f4f0;
+        font-family: 'Courier New', monospace;
+        transition: background 0.5s ease;
+    }
+
+    /* ===================== THEME BACKDROPS (flat) ===================== */
+    body[data-theme="paper"]     { background: #f4f4f0; }
+    body[data-theme="aurora"]    { background: #04121a; }
+    body[data-theme="starfield"] { background: #05060d; }
+    body[data-theme="nebula"]    { background: #07020f; }
+    body[data-theme="vaporwave"] { background: #2b0b42; }
+    body[data-theme="cyberpunk"] { background: #05000d; }
+    body[data-theme="matrix"]    { background: #000502; }
+    body[data-theme="sunset"]    { background: #1b0430; }
+    body[data-theme="midnight"]  { background: #0a0f24; }
+    body[data-theme="frost"]     { background: #dbeefb; }
+
+    /* ===================== ASCII CANVAS ===================== */
+    #ascii-container {
+        position: fixed; inset: 0; z-index: 10;
+        display: flex; justify-content: center; align-items: center;
+        cursor: crosshair; pointer-events: auto;
+    }
+    #ascii-container > div,
+    #ascii-container table,
+    #ascii-container td {
+        background: transparent !important;
+        border: none !important;
+        user-select: none;
+    }
+    #ascii-container table { margin: 0 auto; }
+    #ascii-container td {
+        padding: 0 !important;
+        margin: 0 !important;
+        font-family: 'Courier New', monospace !important;
+        line-height: 1 !important;
+    }
+
+    /* ===================== EFFECTS ===================== */
+    .scanlines {
+        position: fixed; inset: 0; pointer-events: none; z-index: 20;
+        background: repeating-linear-gradient(
+            0deg,
+            rgba(0,0,0,.03) 0px, rgba(0,0,0,.03) 1px,
+            transparent 1px, transparent 3px
+        );
+        mix-blend-mode: multiply;
+    }
+    .vignette {
+        position: fixed; inset: 0; pointer-events: none; z-index: 21;
+        transition: opacity .8s ease;
+        background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.35) 100%);
+    }
+
+    /* ===================== PANEL ===================== */
+    #panel {
+        position: fixed; bottom: 20px; left: 50%;
+        transform: translateX(-50%);
+        display: flex; gap: 22px;
+        padding: 14px 22px 12px;
+        background: rgba(8,8,10,.85);
+        border: 1px solid rgba(255,255,255,.14);
+        border-radius: 6px;
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        z-index: 100;
+        box-shadow: 0 12px 40px rgba(0,0,0,.45);
+        font-family: 'Courier New', monospace;
+        animation: panelFade .9s ease .5s both;
+        max-width: 96vw; flex-wrap: wrap;
+        justify-content: center;
+        align-items: flex-start;
+    }
+    @keyframes panelFade {
+        from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+        to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
+    .panel-section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .panel-label {
+        font-size: 9px; letter-spacing: 2.4px; color: #808080;
+        text-transform: uppercase; padding-left: 3px;
+    }
+    .btn-row { display: flex; gap: 4px; flex-wrap: wrap; max-width: 460px; }
+    .btn-row button {
+        background: transparent; border: 1px solid rgba(255,255,255,.15);
+        color: #d6d6d6; padding: 5px 10px;
+        font-family: inherit; font-size: 10px; letter-spacing: .6px;
+        cursor: pointer; text-transform: uppercase;
+        transition: all .16s ease; border-radius: 3px; outline: none;
+        white-space: nowrap;
+    }
+    .btn-row button:hover {
+        background: rgba(255,255,255,.08);
+        border-color: rgba(255,255,255,.42); color: #fff;
+    }
+    .btn-row button.active {
+        background: #f0f0f0; color: #111; border-color: #f0f0f0;
+        box-shadow: 0 0 14px rgba(255,255,255,.35);
+    }
+    .btn-row button.ghost {
+        border-style: dashed; color: #a8a8a8;
+    }
+    .btn-row button.ghost:hover { color: #fff; }
+
+    .hint {
+        position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+        font-size: 10px; letter-spacing: 3px;
+        color: rgba(255,255,255,.55); text-transform: uppercase;
+        z-index: 100; pointer-events: none; user-select: none;
+        mix-blend-mode: difference;
+        white-space: nowrap;
+    }
+    .hint kbd {
+        display: inline-block;
+        border: 1px solid rgba(255,255,255,.4);
+        padding: 0 4px; margin: 0 1px;
+        border-radius: 2px;
+        font-family: inherit;
+        font-size: 9px;
+        letter-spacing: 1px;
+    }
+    @media (max-width: 720px) {
+        .hint .extra { display: none; }
+    }
+</style>
+</head>
+<body data-theme="paper">
+
+    <div id="ascii-container"></div>
+    <div class="scanlines"></div>
+    <div class="vignette" id="vignette"></div>
+
+    <div class="hint">
+        move · click · <span class="extra"><kbd>1</kbd>–<kbd>0</kbd> emotion · <kbd>T</kbd> theme · <kbd>D</kbd> density · <kbd>R</kbd> shuffle · <kbd>space</kbd> blink</span>
+    </div>
+
+    <aside id="panel">
+        <div class="panel-section">
+            <span class="panel-label">Emotion</span>
+            <div class="btn-row" id="emotion-row"></div>
+        </div>
+        <div class="panel-section">
+            <span class="panel-label">Scene</span>
+            <div class="btn-row" id="theme-row"></div>
+        </div>
+        <div class="panel-section">
+            <span class="panel-label">Detail</span>
+            <div class="btn-row" id="density-row"></div>
+        </div>
+        <div class="panel-section">
+            <span class="panel-label">Action</span>
+            <div class="btn-row">
+                <button id="shuffle-btn" class="ghost">↺ shuffle</button>
+            </div>
+        </div>
+    </aside>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+    import * as THREE from 'three';
+    import { AsciiEffect } from 'three/addons/effects/AsciiEffect.js';
+
+    const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    /* ======================================================= */
+    /* SCENE / CAMERA / RENDERER                               */
+    /* ======================================================= */
+    const scene = new THREE.Scene();
+
+    const camera = new THREE.PerspectiveCamera(
+        38, window.innerWidth / window.innerHeight, 0.1, 100
+    );
+    camera.position.set(0, 0.05, 6.4);
+    camera.lookAt(0, -0.3, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(1);
+    renderer.setClearAlpha(0);
+
+    /* ======================================================= */
+    /* LIGHTING                                                */
+    /* ======================================================= */
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.4);
+    keyLight.position.set(2, 3, 4);
+    scene.add(keyLight);
+
+    const rimLight = new THREE.DirectionalLight(0xffffff, 0.65);
+    rimLight.position.set(-3, 1.5, -2);
+    scene.add(rimLight);
+
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.35);
+    fillLight.position.set(0, -3, 2);
+    scene.add(fillLight);
+
+    /* ======================================================= */
+    /* CHARACTER — bodyGroup + headGroup                       */
+    /* ======================================================= */
+    const bodyGroup = new THREE.Group();
+    const headGroup = new THREE.Group();
+    headGroup.position.set(0, -1.02, 0);
+    bodyGroup.add(headGroup);
+    scene.add(bodyGroup);
+
+    // ---------- BODY ----------
+    const neck = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.35, 0.42, 0.35, 24),
+        new THREE.MeshStandardMaterial({ color: 0xbbbbbb, roughness: 0.6 })
+    );
+    neck.position.set(0, -1.02, 0);
+    bodyGroup.add(neck);
+
+    const torso = new THREE.Mesh(
+        new THREE.SphereGeometry(1, 32, 32),
+        new THREE.MeshStandardMaterial({ color: 0xcacaca, roughness: 0.6, metalness: 0.08 })
+    );
+    torso.scale.set(1.35, 1.25, 0.95);
+    torso.position.set(0, -2.15, 0);
+    bodyGroup.add(torso);
+
+    const shoulderGeo = new THREE.SphereGeometry(0.42, 24, 24);
+    const shoulderMat = new THREE.MeshStandardMaterial({ color: 0xb8b8b8, roughness: 0.55 });
+    const leftShoulder  = new THREE.Mesh(shoulderGeo, shoulderMat);
+    const rightShoulder = new THREE.Mesh(shoulderGeo, shoulderMat);
+    leftShoulder.position.set(-1.25, -1.75, 0);
+    rightShoulder.position.set(1.25, -1.75, 0);
+    bodyGroup.add(leftShoulder, rightShoulder);
+
+    // ---------- ARMS ----------
+    const armGeo = new THREE.CapsuleGeometry(0.17, 0.85, 6, 14);
+    const armMat = new THREE.MeshStandardMaterial({ color: 0xb2b2b2, roughness: 0.6, metalness: 0.05 });
+
+    const leftArmPivot = new THREE.Group();
+    leftArmPivot.position.set(-1.25, -1.75, 0);
+    leftArmPivot.rotation.z = 0.15;
+    bodyGroup.add(leftArmPivot);
+    const leftArm = new THREE.Mesh(armGeo, armMat);
+    leftArm.position.set(-0.05, -0.52, 0);
+    leftArmPivot.add(leftArm);
+
+    const rightArmPivot = new THREE.Group();
+    rightArmPivot.position.set(1.25, -1.75, 0);
+    rightArmPivot.rotation.z = -0.15;
+    bodyGroup.add(rightArmPivot);
+    const rightArm = new THREE.Mesh(armGeo, armMat);
+    rightArm.position.set(0.05, -0.52, 0);
+    rightArmPivot.add(rightArm);
+
+    // ---------- CHEST PANEL ----------
+    const chestPanel = new THREE.Mesh(
+        new THREE.BoxGeometry(1.0, 0.75, 0.12),
+        new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.35, metalness: 0.5 })
+    );
+    chestPanel.position.set(0, -2.15, 1.05);
+    bodyGroup.add(chestPanel);
+
+    const lightGeo = new THREE.SphereGeometry(0.075, 16, 16);
+    const lightMat1 = new THREE.MeshStandardMaterial({ color: 0xff3355, emissive: 0xff3355, emissiveIntensity: 0.9, roughness: 0.4 });
+    const lightMat2 = new THREE.MeshStandardMaterial({ color: 0x33ff88, emissive: 0x33ff88, emissiveIntensity: 0.9, roughness: 0.4 });
+    const lightMat3 = new THREE.MeshStandardMaterial({ color: 0x33bbff, emissive: 0x33bbff, emissiveIntensity: 0.9, roughness: 0.4 });
+
+    const light1 = new THREE.Mesh(lightGeo, lightMat1); light1.position.set(-0.28, -2.15, 1.13);
+    const light2 = new THREE.Mesh(lightGeo, lightMat2); light2.position.set( 0.00, -2.15, 1.13);
+    const light3 = new THREE.Mesh(lightGeo, lightMat3); light3.position.set( 0.28, -2.15, 1.13);
+    bodyGroup.add(light1, light2, light3);
+
+    // ---------- HEAD ----------
+    const head = new THREE.Mesh(
+        new THREE.SphereGeometry(1.05, 48, 48),
+        new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.55, metalness: 0.05 })
+    );
+    head.scale.set(1.05, 0.98, 1.0);
+    head.position.set(0, 1.02, 0);
+    headGroup.add(head);
+
+    const socketGeo = new THREE.SphereGeometry(0.30, 32, 32);
+    const socketMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
+
+    const leftSocket  = new THREE.Mesh(socketGeo, socketMat);
+    const rightSocket = new THREE.Mesh(socketGeo, socketMat);
+    leftSocket.position.set(-0.42, 1.20, 0.86);
+    rightSocket.position.set(0.42, 1.20, 0.86);
+    headGroup.add(leftSocket, rightSocket);
+
+    const pupilGeo = new THREE.SphereGeometry(0.15, 24, 24);
+    const pupilMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.25, metalness: 0.1 });
+
+    const leftPupil  = new THREE.Mesh(pupilGeo, pupilMat);
+    const rightPupil = new THREE.Mesh(pupilGeo, pupilMat);
+    leftPupil.position.copy(leftSocket.position);  leftPupil.position.z  += 0.16;
+    rightPupil.position.copy(rightSocket.position); rightPupil.position.z += 0.16;
+    headGroup.add(leftPupil, rightPupil);
+
+    const glintGeo = new THREE.SphereGeometry(0.05, 12, 12);
+    const glintMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const leftGlint  = new THREE.Mesh(glintGeo, glintMat); leftGlint.position.set(-0.05, 0.06, 0.12);
+    const rightGlint = new THREE.Mesh(glintGeo, glintMat); rightGlint.position.set(-0.05, 0.06, 0.12);
+    leftPupil.add(leftGlint);
+    rightPupil.add(rightGlint);
+
+    const browGeo = new THREE.BoxGeometry(0.34, 0.055, 0.08);
+    const browMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.7 });
+    const leftBrow  = new THREE.Mesh(browGeo, browMat);
+    const rightBrow = new THREE.Mesh(browGeo, browMat);
+    leftBrow.position.set(-0.42, 1.57, 0.98);  leftBrow.rotation.z  = -0.15;
+    rightBrow.position.set(0.42, 1.57, 0.98);  rightBrow.rotation.z =  0.15;
+    headGroup.add(leftBrow, rightBrow);
+
+    const nose = new THREE.Mesh(
+        new THREE.ConeGeometry(0.09, 0.18, 16),
+        new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.7 })
+    );
+    nose.rotation.x = Math.PI / 2;
+    nose.position.set(0, 1.00, 1.02);
+    headGroup.add(nose);
+
+    const cheekGeo = new THREE.SphereGeometry(0.14, 16, 16);
+    const cheekMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, transparent: true, opacity: 0.85 });
+    const leftCheek  = new THREE.Mesh(cheekGeo, cheekMat);
+    const rightCheek = new THREE.Mesh(cheekGeo, cheekMat);
+    leftCheek.position.set(-0.65, 0.88, 0.82);
+    rightCheek.position.set(0.65, 0.88, 0.82);
+    headGroup.add(leftCheek, rightCheek);
+
+    const mouth = new THREE.Mesh(
+        new THREE.TorusGeometry(0.18, 0.03, 8, 32, Math.PI),
+        new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.8 })
+    );
+    mouth.rotation.z = Math.PI;
+    mouth.rotation.x = -0.35;
+    mouth.position.set(0, 0.67, 0.95);
+    headGroup.add(mouth);
+
+    const antennaStick = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.03, 0.03, 0.5, 12),
+        new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.6 })
+    );
+    antennaStick.position.set(0, 2.30, 0);
+    headGroup.add(antennaStick);
+
+    const antennaBall = new THREE.Mesh(
+        new THREE.SphereGeometry(0.11, 16, 16),
+        new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.3, metalness: 0.4 })
+    );
+    antennaBall.position.set(0, 2.60, 0);
+    headGroup.add(antennaBall);
+
+    const earGeo = new THREE.CylinderGeometry(0.14, 0.14, 0.12, 16);
+    const earMat = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.5 });
+    const leftEar  = new THREE.Mesh(earGeo, earMat);
+    const rightEar = new THREE.Mesh(earGeo, earMat);
+    leftEar.rotation.z  = Math.PI / 2;
+    rightEar.rotation.z = Math.PI / 2;
+    leftEar.position.set(-1.08, 1.02, 0);
+    rightEar.position.set( 1.08, 1.02, 0);
+    headGroup.add(leftEar, rightEar);
+
+    /* ======================================================= */
+    /* EMOTIONS                                                */
+    /* ======================================================= */
+    const EMOTIONS = {
+        neutral: {
+            browL_y: 1.57, browL_rot: -0.15, browR_y: 1.57, browR_rot:  0.15,
+            mouth_rot: Math.PI, mouth_sx: 1.00, mouth_sy: 1.00, mouth_y: 0.67,
+            head_tilt_y: 0.10, head_tilt_x: 0.06, head_bias_x: 0.00,
+            antenna_speed: 2.4, pupil_color: 0x111111,
+            eye_open: 1.00, eyeL: 1.0, eyeR: 1.0
+        },
+        happy: {
+            browL_y: 1.62, browL_rot: -0.28, browR_y: 1.62, browR_rot:  0.28,
+            mouth_rot: Math.PI, mouth_sx: 1.35, mouth_sy: 1.55, mouth_y: 0.72,
+            head_tilt_y: 0.16, head_tilt_x: 0.06, head_bias_x: -0.03,
+            antenna_speed: 4.5, pupil_color: 0x111111,
+            eye_open: 1.00, eyeL: 1.0, eyeR: 1.0
+        },
+        sad: {
+            browL_y: 1.62, browL_rot: -0.42, browR_y: 1.62, browR_rot:  0.42,
+            mouth_rot: 0,     mouth_sx: 1.00, mouth_sy: 0.90, mouth_y: 0.62,
+            head_tilt_y: 0.05, head_tilt_x: 0.10, head_bias_x: 0.18,
+            antenna_speed: 1.0, pupil_color: 0x111111,
+            eye_open: 0.80, eyeL: 1.0, eyeR: 1.0
+        },
+        angry: {
+            browL_y: 1.54, browL_rot:  0.32, browR_y: 1.54, browR_rot: -0.32,
+            mouth_rot: Math.PI, mouth_sx: 1.20, mouth_sy: 0.35, mouth_y: 0.64,
+            head_tilt_y: 0.06, head_tilt_x: 0.08, head_bias_x: 0.05,
+            antenna_speed: 7.0, pupil_color: 0x220000,
+            eye_open: 0.85, eyeL: 1.0, eyeR: 1.0
+        },
+        surprised: {
+            browL_y: 1.72, browL_rot: -0.03, browR_y: 1.72, browR_rot:  0.03,
+            mouth_rot: Math.PI, mouth_sx: 0.55, mouth_sy: 1.90, mouth_y: 0.70,
+            head_tilt_y: 0.05, head_tilt_x: 0.05, head_bias_x: -0.02,
+            antenna_speed: 9.0, pupil_color: 0x111111,
+            eye_open: 1.15, eyeL: 1.0, eyeR: 1.0
+        },
+        sleepy: {
+            browL_y: 1.52, browL_rot: -0.08, browR_y: 1.52, browR_rot:  0.08,
+            mouth_rot: Math.PI, mouth_sx: 0.75, mouth_sy: 0.25, mouth_y: 0.64,
+            head_tilt_y: 0.05, head_tilt_x: 0.06, head_bias_x: 0.22,
+            antenna_speed: 0.5, pupil_color: 0x111111,
+            eye_open: 0.28, eyeL: 1.0, eyeR: 1.0
+        },
+        love: {
+            browL_y: 1.64, browL_rot: -0.22, browR_y: 1.64, browR_rot:  0.22,
+            mouth_rot: Math.PI, mouth_sx: 1.25, mouth_sy: 1.70, mouth_y: 0.72,
+            head_tilt_y: 0.13, head_tilt_x: 0.05, head_bias_x: -0.02,
+            antenna_speed: 5.5, pupil_color: 0xdd3366,
+            eye_open: 1.05, eyeL: 1.0, eyeR: 1.0
+        },
+        wink: {
+            browL_y: 1.64, browL_rot: -0.30, browR_y: 1.55, browR_rot:  0.10,
+            mouth_rot: Math.PI, mouth_sx: 1.10, mouth_sy: 1.25, mouth_y: 0.70,
+            head_tilt_y: 0.12, head_tilt_x: 0.05, head_bias_x: -0.06,
+            antenna_speed: 3.4, pupil_color: 0x111111,
+            eye_open: 1.00, eyeL: 1.0, eyeR: 0.08
+        },
+        confused: {
+            browL_y: 1.72, browL_rot: -0.05, browR_y: 1.50, browR_rot:  0.28,
+            mouth_rot: Math.PI, mouth_sx: 0.80, mouth_sy: 0.55, mouth_y: 0.60,
+            head_tilt_y: 0.06, head_tilt_x: 0.07, head_bias_x: 0.12,
+            antenna_speed: 1.4, pupil_color: 0x111111,
+            eye_open: 1.05, eyeL: 1.0, eyeR: 1.0
+        },
+        smug: {
+            browL_y: 1.58, browL_rot: -0.32, browR_y: 1.66, browR_rot:  0.05,
+            mouth_rot: Math.PI, mouth_sx: 1.20, mouth_sy: 0.75, mouth_y: 0.66,
+            head_tilt_y: 0.15, head_tilt_x: 0.05, head_bias_x: -0.05,
+            antenna_speed: 2.0, pupil_color: 0x111111,
+            eye_open: 1.00, eyeL: 0.75, eyeR: 1.0
+        },
+        thinking: {
+            browL_y: 1.74, browL_rot: -0.02, browR_y: 1.48, browR_rot:  0.26,
+            mouth_rot: Math.PI, mouth_sx: 0.62, mouth_sy: 0.48, mouth_y: 0.62,
+            head_tilt_y: 0.08, head_tilt_x: 0.10, head_bias_x: 0.14,
+            antenna_speed: 1.6, pupil_color: 0x111111,
+            eye_open: 0.95, eyeL: 1.0, eyeR: 1.0
+        },
+        giggle: {
+            browL_y: 1.68, browL_rot: -0.36, browR_y: 1.68, browR_rot:  0.36,
+            mouth_rot: Math.PI, mouth_sx: 1.55, mouth_sy: 1.30, mouth_y: 0.74,
+            head_tilt_y: 0.15, head_tilt_x: 0.07, head_bias_x: -0.05,
+            antenna_speed: 6.8, pupil_color: 0x111111,
+            eye_open: 0.62, eyeL: 1.0, eyeR: 1.0
+        }
+    };
+
+    const anim = Object.assign({}, EMOTIONS.neutral);
+    const vel  = {};
+    for (const k in anim) if (typeof anim[k] === 'number') vel[k] = 0;
+
+    let targetEmotion = EMOTIONS.neutral;
+    let currentEmotionName = 'neutral';
+
+    function setEmotion(name, persist = true) {
+        if (!EMOTIONS[name]) return;
+        targetEmotion = EMOTIONS[name];
+        currentEmotionName = name;
+        if (persist) try { localStorage.setItem('ascii-char-emotion', name); } catch(e) {}
+        document.querySelectorAll('#emotion-row button').forEach(b => {
+            b.classList.toggle('active', b.dataset.emotion === name);
+        });
+    }
+
+    /* ======================================================= */
+    /* THEMES                                                  */
+    /* ======================================================= */
+    const RAMP_CLASSIC = ' .\'`^",:;Il!i~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$';
+
+    const THEMES = {
+        paper:     { fg: '#0a0a0a', ramp: RAMP_CLASSIC,      vignette: 0.10, vivid: false },
+        aurora:    { fg: '#d7ffe9', ramp: ' .·+*○✦✧',         vignette: 0.45, vivid: true  },
+        starfield: { fg: '#ffffff', ramp: ' .·+*○●',          vignette: 0.55, vivid: false },
+        nebula:    { fg: '#f0d8ff', ramp: ' .·•✦✧*',          vignette: 0.50, vivid: true  },
+        vaporwave: { fg: '#ffe9c9', ramp: ' .·•○◎●',          vignette: 0.35, vivid: true  },
+        cyberpunk: { fg: '#00ffcc', ramp: ' .:-=+*#%@░▒▓█',   vignette: 0.55, vivid: true  },
+        matrix:    { fg: '#2bff6a', ramp: ' .:-=+*#%@',       vignette: 0.60, vivid: false },
+        sunset:    { fg: '#fff0c8', ramp: ' .·:;*oO@',        vignette: 0.35, vivid: true  },
+        midnight:  { fg: '#dfe9ff', ramp: ' .·+*○●',          vignette: 0.55, vivid: false },
+        frost:     { fg: '#002244', ramp: ' .·:*+*',          vignette: 0.05, vivid: true  }
+    };
+
+    let currentThemeName = 'paper';
+    let currentTheme = THEMES.paper;
+
+    /* ======================================================= */
+    /* DENSITY                                                 */
+    /* ======================================================= */
+    const DENSITIES = {
+        coarse: { resolution: 0.35, fontSize: '18px' },
+        normal: { resolution: 0.19, fontSize: '15px' },
+        fine:   { resolution: 0.11, fontSize: '12px' }
+    };
+    let currentDensityName = 'normal';
+
+    /* ======================================================= */
+    /* ASCII EFFECT                                            */
+    /* ======================================================= */
+    const asciiContainer = document.getElementById('ascii-container');
+    let effect = null;
+
+    function createEffect() {
+        if (effect && effect.domElement.parentNode) {
+            effect.domElement.parentNode.removeChild(effect.domElement);
+        }
+
+        const dens = DENSITIES[currentDensityName];
+        effect = new AsciiEffect(renderer, currentTheme.ramp, {
+            resolution: dens.resolution,
+            color: currentTheme.vivid,
+            alpha: true,
+            block: false,
+            invert: false
+        });
+
+        effect.domElement.style.color = currentTheme.fg;
+        effect.domElement.style.backgroundColor = 'transparent';
+        effect.domElement.style.fontFamily = "'Courier New', monospace";
+        effect.domElement.style.fontSize = dens.fontSize;
+        effect.domElement.style.lineHeight = '1';
+        effect.domElement.style.letterSpacing = '0';
+        effect.domElement.style.userSelect = 'none';
+        effect.domElement.style.pointerEvents = 'none';
+
+        asciiContainer.appendChild(effect.domElement);
+        effect.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    /* ======================================================= */
+    /* SETTERS                                                 */
+    /* ======================================================= */
+    function setTheme(name, persist = true) {
+        const t = THEMES[name];
+        if (!t) return;
+        const prev = currentTheme;
+        currentThemeName = name;
+        currentTheme = t;
+
+        document.body.setAttribute('data-theme', name);
+        document.getElementById('vignette').style.opacity = t.vignette;
+
+        if (effect) {
+            if (prev.ramp === t.ramp && prev.vivid === t.vivid) {
+                effect.domElement.style.color = t.fg;
+            } else {
+                createEffect();
+            }
+        }
+
+        if (persist) try { localStorage.setItem('ascii-char-theme', name); } catch(e) {}
+        document.querySelectorAll('#theme-row button').forEach(b => {
+            b.classList.toggle('active', b.dataset.theme === name);
+        });
+    }
+
+    function setDensity(name, persist = true) {
+        if (!DENSITIES[name]) return;
+        currentDensityName = name;
+        createEffect();
+        if (persist) try { localStorage.setItem('ascii-char-density', name); } catch(e) {}
+        document.querySelectorAll('#density-row button').forEach(b => {
+            b.classList.toggle('active', b.dataset.density === name);
+        });
+    }
+
+    /* ======================================================= */
+    /* BUILD PANEL                                             */
+    /* ======================================================= */
+    const emotionRow = document.getElementById('emotion-row');
+    Object.keys(EMOTIONS).forEach(name => {
+        const btn = document.createElement('button');
+        btn.textContent = name;
+        btn.dataset.emotion = name;
+        btn.addEventListener('click', () => setEmotion(name));
+        emotionRow.appendChild(btn);
+    });
+
+    const themeRow = document.getElementById('theme-row');
+    Object.keys(THEMES).forEach(name => {
+        const btn = document.createElement('button');
+        btn.textContent = name;
+        btn.dataset.theme = name;
+        btn.addEventListener('click', () => setTheme(name));
+        themeRow.appendChild(btn);
+    });
+
+    const densityRow = document.getElementById('density-row');
+    Object.keys(DENSITIES).forEach(name => {
+        const btn = document.createElement('button');
+        btn.textContent = name;
+        btn.dataset.density = name;
+        btn.addEventListener('click', () => setDensity(name));
+        densityRow.appendChild(btn);
+    });
+
+    document.getElementById('shuffle-btn').addEventListener('click', () => {
+        const themes = Object.keys(THEMES).filter(t => t !== currentThemeName);
+        const t = themes[Math.floor(Math.random() * themes.length)];
+        setTheme(t);
+
+        const emotions = Object.keys(EMOTIONS).filter(e => e !== currentEmotionName);
+        const em = emotions[Math.floor(Math.random() * emotions.length)];
+        setEmotion(em);
+
+        triggerWave();
+    });
+
+    // restore from storage / URL
+    {
+        const params = new URLSearchParams(location.search);
+        let e = 'neutral', t = 'paper', d = 'normal';
+        try {
+            e = params.get('emotion') || localStorage.getItem('ascii-char-emotion') || 'neutral';
+            t = params.get('theme')   || localStorage.getItem('ascii-char-theme')   || 'paper';
+            d = params.get('density') || localStorage.getItem('ascii-char-density') || 'normal';
+        } catch(err) {}
+        if (!EMOTIONS[e]) e = 'neutral';
+        if (!THEMES[t])   t = 'paper';
+        if (!DENSITIES[d]) d = 'normal';
+
+        setEmotion(e, false);
+        setTheme(t, false);
+        setDensity(d, false);
+    }
+    if (!effect) createEffect();
+
+    /* ======================================================= */
+    /* MOUSE TRACKING                                          */
+    /* ======================================================= */
+    const mouseTarget  = new THREE.Vector2(0, 0);
+    const mouseCurrent = new THREE.Vector2(0, 0);
+    let lastMouseMove = performance.now();
+
+    function onPointer(x, y) {
+        mouseTarget.x =  (x / window.innerWidth)  * 2 - 1;
+        mouseTarget.y = -(y / window.innerHeight) * 2 + 1;
+        lastMouseMove = performance.now();
+    }
+    window.addEventListener('mousemove', e => onPointer(e.clientX, e.clientY));
+    window.addEventListener('touchmove', e => {
+        if (e.touches[0]) onPointer(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: true });
+
+    /* ======================================================= */
+    /* IDLE LOOK-AROUND                                        */
+    /* ======================================================= */
+    const idleLook = { x: 0, y: 0, tx: 0, ty: 0, t: 0 };
+
+    function updateIdleLook(dt) {
+        const isIdle = performance.now() - lastMouseMove > 2200;
+        if (isIdle && !REDUCED_MOTION) {
+            idleLook.t -= dt;
+            if (idleLook.t <= 0) {
+                idleLook.t = 1.6 + Math.random() * 2.6;
+                idleLook.tx = (Math.random() - 0.5) * 0.85;
+                idleLook.ty = (Math.random() - 0.5) * 0.45;
+            }
+        } else {
+            idleLook.tx = 0;
+            idleLook.ty = 0;
+        }
+        const k = 1 - Math.pow(0.12, dt);
+        idleLook.x += (idleLook.tx - idleLook.x) * k;
+        idleLook.y += (idleLook.ty - idleLook.y) * k;
+    }
+
+    /* ======================================================= */
+    /* WAVE                                                    */
+    /* ======================================================= */
+    let waveStartTime = 0;
+    let waveEndTime   = 0;
+
+    function triggerWave() {
+        const now = performance.now();
+        if (now > waveEndTime - 200) {
+            waveStartTime = now;
+            waveEndTime   = now + 1700;
+        }
+    }
+
+    /* ======================================================= */
+    /* CLICK REACTION                                          */
+    /* ======================================================= */
+    const raycaster = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+    let reactionName  = null;
+    let reactionUntil = 0;
+    let emotionBeforeReaction = 'neutral';
+
+    window.addEventListener('pointerdown', e => {
+        if (e.target.closest && e.target.closest('#panel')) return;
+
+        ndc.x =  (e.clientX / window.innerWidth)  * 2 - 1;
+        ndc.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(ndc, camera);
+        const hit = raycaster.intersectObject(headGroup, true)[0]
+                 || raycaster.intersectObject(torso, true)[0];
+        if (!hit) return;
+
+        if (!reactionName) emotionBeforeReaction = currentEmotionName;
+
+        const prev = currentEmotionName;
+        const react = (prev === 'angry' || prev === 'sleepy') ? 'surprised'
+                    : (prev === 'sad' || prev === 'confused') ? 'happy'
+                    : 'giggle';
+
+        reactionName  = react;
+        reactionUntil = performance.now() + 1400;
+        setEmotion(react, false);
+
+        headGroup.scale.setScalar(1.08);
+        setTimeout(() => headGroup.scale.setScalar(1), 140);
+
+        triggerWave();
+    });
+
+    /* ======================================================= */
+    /* BLINK + SACCADES                                        */
+    /* ======================================================= */
+    let blinkTimer = 0;
+    let nextBlink  = 2 + Math.random() * 3;
+    let blinkProgress = 0;
+    let isBlinking = false;
+    let blinkMul = 1;
+
+    function updateBlink(dt) {
+        blinkTimer += dt;
+        if (!isBlinking && blinkTimer >= nextBlink) { isBlinking = true; blinkProgress = 0; }
+        if (isBlinking) {
+            blinkProgress += dt * 8;
+            if (blinkProgress <= 1) {
+                blinkMul = 1 - Math.sin(blinkProgress * Math.PI);
+            } else {
+                isBlinking = false;
+                blinkTimer = 0;
+                nextBlink = (REDUCED_MOTION ? 5 : 2) + Math.random() * (REDUCED_MOTION ? 5 : 4);
+                blinkMul = 1;
+            }
+        }
+        const base = anim.eye_open;
+        leftSocket.scale.y  = Math.max(base * blinkMul * anim.eyeL, 0.03);
+        rightSocket.scale.y = Math.max(base * blinkMul * anim.eyeR, 0.03);
+        leftPupil.scale.y   = leftSocket.scale.y;
+        rightPupil.scale.y  = rightSocket.scale.y;
+    }
+
+    const saccade = { x: 0, y: 0, tx: 0, ty: 0, t: 0 };
+    function updateSaccades(dt) {
+        saccade.t -= dt;
+        if (saccade.t <= 0) {
+            saccade.t  = 0.4 + Math.random() * 1.6;
+            saccade.tx = (Math.random() - 0.5) * 0.06;
+            saccade.ty = (Math.random() - 0.5) * 0.05;
+        }
+        const k = 1 - Math.pow(0.001, dt);
+        saccade.x += (saccade.tx - saccade.x) * k;
+        saccade.y += (saccade.ty - saccade.y) * k;
+    }
+
+    /* ======================================================= */
+    /* SPRING ANIMATION                                        */
+    /* ======================================================= */
+    function spring(name, target, dt, stiffness = 180, damping = 22) {
+        const a = (target - anim[name]) * stiffness - vel[name] * damping;
+        vel[name]  += a * dt;
+        anim[name] += vel[name] * dt;
+    }
+
+    function stepAnim(dt) {
+        const S = 200, D = 24;
+        spring('browL_y',     targetEmotion.browL_y,     dt, S, D);
+        spring('browL_rot',   targetEmotion.browL_rot,   dt, S, D);
+        spring('browR_y',     targetEmotion.browR_y,     dt, S, D);
+        spring('browR_rot',   targetEmotion.browR_rot,   dt, S, D);
+        spring('mouth_rot',   targetEmotion.mouth_rot,   dt, S, D);
+        spring('mouth_sx',    targetEmotion.mouth_sx,    dt, S, D);
+        spring('mouth_sy',    targetEmotion.mouth_sy,    dt, S, D);
+        spring('mouth_y',     targetEmotion.mouth_y,     dt, S, D);
+        spring('head_tilt_y', targetEmotion.head_tilt_y, dt, 120, 20);
+        spring('head_tilt_x', targetEmotion.head_tilt_x, dt, 120, 20);
+        spring('head_bias_x', targetEmotion.head_bias_x, dt, 120, 20);
+        spring('antenna_speed', targetEmotion.antenna_speed, dt, 60, 14);
+        spring('eye_open',    targetEmotion.eye_open,    dt, 260, 26);
+        spring('eyeL',        targetEmotion.eyeL,        dt, 260, 26);
+        spring('eyeR',        targetEmotion.eyeR,        dt, 260, 26);
+
+        const pc = anim.pupil_color, tc = targetEmotion.pupil_color;
+        const k  = 1 - Math.pow(0.001, dt);
+        const cr = (pc >> 16) & 0xff, cg = (pc >> 8) & 0xff, cb = pc & 0xff;
+        const tr = (tc >> 16) & 0xff, tg = (tc >> 8) & 0xff, tb = tc & 0xff;
+        anim.pupil_color = (Math.round(cr + (tr - cr) * k) << 16)
+                         | (Math.round(cg + (tg - cg) * k) <<  8)
+                         |  Math.round(cb + (tb - cb) * k);
+        pupilMat.color.setHex(anim.pupil_color);
+    }
+
+    /* ======================================================= */
+    /* ANIMATION LOOP                                          */
+    /* ======================================================= */
+    const clock = new THREE.Clock();
+
+    function frame() {
+        requestAnimationFrame(frame);
+
+        const dt = Math.min(clock.getDelta(), 0.05);
+        const t  = clock.getElapsedTime();
+        const now = performance.now();
+
+        if (reactionName && now > reactionUntil) {
+            const stillReacting = currentEmotionName === reactionName;
+            reactionName = null;
+            if (stillReacting) setEmotion(emotionBeforeReaction, false);
+        }
+
+        mouseCurrent.x += (mouseTarget.x - mouseCurrent.x) * 0.08;
+        mouseCurrent.y += (mouseTarget.y - mouseCurrent.y) * 0.08;
+
+        updateIdleLook(dt);
+
+        const lookX = mouseCurrent.x + idleLook.x;
+        const lookY = mouseCurrent.y + idleLook.y;
+
+        stepAnim(dt);
+        updateBlink(dt);
+        if (!REDUCED_MOTION) updateSaccades(dt);
+
+        const maxOff = 0.13;
+        const pX = lookX * maxOff + saccade.x;
+        const pY = lookY * maxOff + saccade.y;
+        leftPupil.position.x  = leftSocket.position.x  + pX;
+        leftPupil.position.y  = leftSocket.position.y  + pY;
+        rightPupil.position.x = rightSocket.position.x + pX;
+        rightPupil.position.y = rightSocket.position.y + pY;
+
+        leftBrow.position.y  = anim.browL_y;
+        rightBrow.position.y = anim.browR_y;
+        leftBrow.rotation.z  = anim.browL_rot;
+        rightBrow.rotation.z = anim.browR_rot;
+
+        mouth.rotation.z = anim.mouth_rot;
+        mouth.scale.set(anim.mouth_sx, anim.mouth_sy, 1);
+        mouth.position.y = anim.mouth_y;
+
+        headGroup.rotation.y = lookX * anim.head_tilt_y;
+        headGroup.rotation.x = -lookY * anim.head_tilt_x + anim.head_bias_x;
+        bodyGroup.rotation.y = lookX * 0.045;
+
+        if (!REDUCED_MOTION) {
+            bodyGroup.position.y = Math.sin(t * 1.2) * 0.06;
+            bodyGroup.position.x = Math.sin(t * 0.7) * 0.02;
+            const breath = 1 + Math.sin(t * 1.1) * 0.015;
+            torso.scale.set(1.35 * breath, 1.25 * breath, 0.95 * breath);
+        }
+
+        antennaBall.position.x  = Math.sin(t * anim.antenna_speed) * 0.03;
+        antennaStick.rotation.z = Math.sin(t * anim.antenna_speed) * 0.04;
+
+        if (now < waveEndTime) {
+            const elapsed   = (now - waveStartTime) / 1000;
+            const remaining = (waveEndTime - now) / 1000;
+            const rampUp    = Math.min(1, elapsed / 0.28);
+            const rampDown  = Math.min(1, remaining / 0.45);
+            const env       = Math.min(rampUp, rampDown);
+            const baseZ     = -0.15;
+            const targetZ   = -2.05;
+            rightArmPivot.rotation.z = baseZ + (targetZ - baseZ) * env
+                                     + Math.sin(elapsed * 18) * 0.35 * env;
+            leftArmPivot.rotation.z  = 0.15 + Math.sin(t * 1.0) * 0.05;
+        } else {
+            rightArmPivot.rotation.z = -0.15 + Math.sin(t * 0.9 + 0.7) * 0.05;
+            leftArmPivot.rotation.z  =  0.15 + Math.sin(t * 0.9)       * 0.05;
+        }
+
+        const pulseSpeed = 3.0 + anim.antenna_speed * 0.25;
+        lightMat1.emissiveIntensity = 0.6 + Math.sin(t * pulseSpeed)       * 0.4;
+        lightMat2.emissiveIntensity = 0.6 + Math.sin(t * pulseSpeed + 1.5) * 0.4;
+        lightMat3.emissiveIntensity = 0.6 + Math.sin(t * pulseSpeed + 3.0) * 0.4;
+
+        if (effect) effect.render(scene, camera);
+    }
+
+    /* ======================================================= */
+    /* RESIZE                                                  */
+    /* ======================================================= */
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        if (effect) effect.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    /* ======================================================= */
+    /* KEYBOARD                                                */
+    /* ======================================================= */
+    const emotionKeys = Object.keys(EMOTIONS);
+    window.addEventListener('keydown', e => {
+        if (e.key === '0') { setEmotion(emotionKeys[9] || emotionKeys[0]); return; }
+        const n = parseInt(e.key, 10);
+        if (n >= 1 && n <= 9 && n <= emotionKeys.length) {
+            setEmotion(emotionKeys[n - 1]);
+            return;
+        }
+        if (e.key === 't' || e.key === 'T') {
+            const names = Object.keys(THEMES);
+            const i = names.indexOf(currentThemeName);
+            setTheme(names[(i + 1) % names.length]);
+        }
+        if (e.key === 'd' || e.key === 'D') {
+            const names = Object.keys(DENSITIES);
+            setDensity(names[(names.indexOf(currentDensityName) + 1) % names.length]);
+        }
+        if (e.key === 'r' || e.key === 'R') {
+            document.getElementById('shuffle-btn').click();
+        }
+        if (e.key === ' ') { isBlinking = true; blinkProgress = 0; e.preventDefault(); }
+    });
+
+    /* ======================================================= */
+    /* GO                                                      */
+    /* ======================================================= */
+    frame();
+    </script>
+</body>
+</html>
