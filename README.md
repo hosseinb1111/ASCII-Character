@@ -303,7 +303,7 @@ For example:
 
 ```bash
 git clone https://github.com/hosseinb1111/ASCII-Character.git
-cd REPO-NAME
+cd ASCII-Character
 ```
 
 Then serve the directory with any static HTTP server.
